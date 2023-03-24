@@ -10,24 +10,31 @@ import (
 // Paper source: https://www.microsoft.com/en-us/research/wp-content/uploads/2016/04/CryptonetsTechReport.pdf
 
 const (
-	IMAGE_WIDTH      = 28
-	IMAGE_CROP       = 13
-	CONVOLUTION_SIZE = IMAGE_CROP * IMAGE_CROP // 169
+	SLOTS              = 8192
+	IMAGE_WIDTH        = 28
+	PADDED_IMAGE_WIDTH = IMAGE_WIDTH + 1
+	IMAGE_NORM         = 256
+	STRIDE             = 2
+	CONV_MAP           = 5
+	CONV_SIZE          = 13
+	CONV_WINDOW_LEN    = 5 // 5 x 5
+	CONVOLUTION_SIZE   = 845
+	POOL_LAYERS        = 100
+	FC_LAYERS          = 10
 )
 
 func pad_image(input [][]float64) [][]float64 {
 	// Pad the upper and left edge with 0s
-	padded_width := IMAGE_WIDTH + 1
-	output := make([][]float64, padded_width)
+	output := make([][]float64, PADDED_IMAGE_WIDTH)
 	for i := 0; i < IMAGE_WIDTH; i++ {
-		row := make([]float64, padded_width)
+		row := make([]float64, PADDED_IMAGE_WIDTH)
 		for j := 0; j < IMAGE_WIDTH; j++ {
 			row[j] = input[i][j]
 		}
 		row[IMAGE_WIDTH] = float64(0)
 		output[i] = row
 	}
-	output[IMAGE_WIDTH] = make([]float64, padded_width)
+	output[IMAGE_WIDTH] = make([]float64, PADDED_IMAGE_WIDTH)
 	return output
 }
 
@@ -40,11 +47,11 @@ func get_images() ([][][]float64, []int) {
 	}
 
 	var images [][][]float64 = make([][][]float64, 0)
-	var answers []int = make([]int, 8192)
+	var answers []int = make([]int, SLOTS)
 
 	// pack a matrix of 8192 x 784
 	// pad image size from 784 to 841
-	for r := 0; r < 8192; r++ {
+	for r := 0; r < SLOTS; r++ {
 		image := dataSet.Data[r]
 		answers[r] = image.Digit
 		image_matrix := make([][]float64, IMAGE_WIDTH)
@@ -61,11 +68,10 @@ func get_images() ([][][]float64, []int) {
 	}
 
 	// normalize images
-	// scale: 16
-	for i := 0; i < 8192; i++ {
-		for j := 0; j < 29; j++ {
-			for k := 0; k < 29; k++ {
-				images[i][j][k] /= 16
+	for i := 0; i < SLOTS; i++ {
+		for j := 0; j < PADDED_IMAGE_WIDTH; j++ {
+			for k := 0; k < PADDED_IMAGE_WIDTH; k++ {
+				images[i][j][k] /= IMAGE_NORM
 			}
 		}
 	}
@@ -78,71 +84,32 @@ func round(x, unit float64) float64 {
 }
 
 func prepare_conv() ([][]float64, []float64) {
-	// rescale kernels
-	// scale: 32
-	rescaled_kernels := make([][]float64, 5)
-	for k, kernel := range model.ConvKernels {
-		rescaled_kernel := make([]float64, 25)
-		for i := 0; i < 5; i++ {
-			for j := 0; j < 5; j++ {
-				val := kernel[i*5+j]
-				rescaled_kernel[i*5+j] = float64(val)
-			}
-		}
-		rescaled_kernels[k] = rescaled_kernel
-	}
-
-	// encode conv bias
-	bias := make([]float64, 5)
-	for i := 0; i < 5; i++ {
-		bias[i] = model.ConvBias[i]
-	}
-
-	return rescaled_kernels, bias
+	return model.ConvKernels, model.ConvBias
 }
 
 func prepare_pool_layer() ([][]float64, []float64) {
-	// len(weights) = 84500
-	pool_layers := make([][]float64, 100)
-	for i := 0; i < 100; i++ {
-		pool_layer := make([]float64, 845)
-		for j := 0; j < 845; j++ {
-			// rescale pool layer
-			val := model.Weights_1[i+j*100]
+	pool_layers := make([][]float64, POOL_LAYERS)
+	for i := 0; i < POOL_LAYERS; i++ {
+		pool_layer := make([]float64, CONVOLUTION_SIZE)
+		for j := 0; j < CONVOLUTION_SIZE; j++ {
 			// transpose weights
-			pool_layer[j] = float64(val)
+			pool_layer[j] = model.Weights_1[i+j*POOL_LAYERS]
 		}
 		pool_layers[i] = pool_layer
 	}
-
-	pool_bias := make([]float64, 100)
-	for i := 0; i < 100; i++ {
-		val := model.PoolBias[i]
-		pool_bias[i] = float64(val)
-	}
-	return pool_layers, pool_bias
+	return pool_layers, model.PoolBias
 }
 
 func prepare_fc_layer() ([][]float64, []float64) {
-	fc_layers := make([][]float64, 10)
-	for i := 0; i < 10; i++ {
-		fc_layer := make([]float64, 100)
-		for j := 0; j < 100; j++ {
-			// rescale fc layer
-			val := model.Weights_3[i*100+j]
-			// transpose weights
-			fc_layer[j] = float64(val)
+	fc_layers := make([][]float64, FC_LAYERS)
+	for i := 0; i < FC_LAYERS; i++ {
+		fc_layer := make([]float64, POOL_LAYERS)
+		for j := 0; j < POOL_LAYERS; j++ {
+			fc_layer[j] = model.Weights_3[i*POOL_LAYERS+j]
 		}
 		fc_layers[i] = fc_layer
 	}
-
-	fc_bias := make([]float64, 10)
-	for i := 0; i < 10; i++ {
-		val := model.FcBias[i]
-		fc_bias[i] = float64(val)
-	}
-
-	return fc_layers, fc_bias
+	return fc_layers, model.FcBias
 }
 
 func convolution_layer(image [][]float64) [][][]float64 {
@@ -157,46 +124,39 @@ func convolution_layer(image [][]float64) [][][]float64 {
 	// Prepare model weights / bias
 	conv_kernels, conv_bias := prepare_conv()
 
-	outputs := make([][][]float64, 5)
-	for o := 0; o < 5; o++ {
-		row_output := make([][]float64, 13)
-		windows := make([][]float64, 169)
-		stride := 2
+	outputs := make([][][]float64, CONV_MAP)
+	for o := 0; o < CONV_MAP; o++ {
+		row_output := make([][]float64, CONV_SIZE)
+		windows := make([][]float64, CONV_SIZE*CONV_SIZE)
 
-		for stride_y := 0; stride_y < 13; stride_y++ {
-			col_output := make([]float64, 13)
-			for stride_x := 0; stride_x < 13; stride_x++ {
+		for stride_y := 0; stride_y < CONV_SIZE; stride_y++ {
+			col_output := make([]float64, CONV_SIZE)
+			for stride_x := 0; stride_x < CONV_SIZE; stride_x++ {
 				// create window
-				window := make([]float64, 25)
-				offset_x := stride_x * stride
-				offset_y := stride_y * stride
-				fmt.Println("corner:", offset_y, " ", offset_x)
-				for i := 0; i < 5; i++ {
-					for j := 0; j < 5; j++ {
+				window := make([]float64, CONV_WINDOW_LEN*CONV_WINDOW_LEN)
+				offset_x := stride_x * STRIDE
+				offset_y := stride_y * STRIDE
+				for i := 0; i < CONV_WINDOW_LEN; i++ {
+					for j := 0; j < CONV_WINDOW_LEN; j++ {
 						// padded image width is 29
-						window[i*5+j] = image[j+offset_y][i+offset_x]
+						window[i*CONV_WINDOW_LEN+j] = image[j+offset_y][i+offset_x]
 					}
 				}
-				fmt.Println("window: ", window)
-				// fmt.Println()
-				windows[stride_y*13+stride_x] = window
+				windows[stride_y*CONV_SIZE+stride_x] = window
 
 				// kernel is already in column major form
 				kernel := conv_kernels[o]
 
-				product := make([]float64, 25)
-				for i := 0; i < 25; i++ {
+				product := make([]float64, CONV_WINDOW_LEN*CONV_WINDOW_LEN)
+				for i := 0; i < CONV_WINDOW_LEN*CONV_WINDOW_LEN; i++ {
 					product[i] = window[i] * kernel[i]
 				}
 
 				// sum all products together
 				sum := product[0]
-				for i := 1; i < 25; i++ {
+				for i := 1; i < CONV_WINDOW_LEN*CONV_WINDOW_LEN; i++ {
 					sum += product[i]
 				}
-
-				// rescale sum
-				sum /= 16.
 
 				// add bias
 				sum += conv_bias[o]
@@ -213,12 +173,12 @@ func convolution_layer(image [][]float64) [][][]float64 {
 }
 
 func square_layer_1(conv_layer [][][]float64) [][][]float64 {
-	squared := make([][][]float64, 5)
-	for i := 0; i < 5; i++ {
-		squared_row := make([][]float64, 13)
-		for j := 0; j < 13; j++ {
-			squared_col := make([]float64, 13)
-			for k := 0; k < 13; k++ {
+	squared := make([][][]float64, CONV_MAP)
+	for i := 0; i < CONV_MAP; i++ {
+		squared_row := make([][]float64, CONV_SIZE)
+		for j := 0; j < CONV_SIZE; j++ {
+			squared_col := make([]float64, CONV_SIZE)
+			for k := 0; k < CONV_SIZE; k++ {
 				ct := conv_layer[i][j][k]
 				sq_ct := ct * ct
 				squared_col[k] = sq_ct
@@ -233,15 +193,14 @@ func square_layer_1(conv_layer [][][]float64) [][][]float64 {
 func pool_layer(sq_layer_1 [][][]float64) []float64 {
 	pool_kernels, pool_bias := prepare_pool_layer()
 
-	pool_layers := 100
-	outputs := make([]float64, pool_layers)
-	for o := 0; o < pool_layers; o++ {
-		sum := float64(0)
+	outputs := make([]float64, POOL_LAYERS)
+	for o := 0; o < POOL_LAYERS; o++ {
+		sum := 0.
 		index := 0
-		for i := 0; i < 5; i++ {
-			for j := 0; j < 13; j++ {
-				for k := 0; k < 13; k++ {
-					sum += float64(sq_layer_1[i][j][k] * pool_kernels[o][index])
+		for i := 0; i < CONV_MAP; i++ {
+			for j := 0; j < CONV_SIZE; j++ {
+				for k := 0; k < CONV_SIZE; k++ {
+					sum += sq_layer_1[i][j][k] * pool_kernels[o][index]
 					index++
 				}
 			}
@@ -249,7 +208,7 @@ func pool_layer(sq_layer_1 [][][]float64) []float64 {
 		outputs[o] = sum
 	}
 
-	for i := 0; i < 100; i++ {
+	for i := 0; i < POOL_LAYERS; i++ {
 		outputs[i] += pool_bias[i]
 	}
 
@@ -257,8 +216,8 @@ func pool_layer(sq_layer_1 [][][]float64) []float64 {
 }
 
 func square_layer_2(pool []float64) []float64 {
-	squared := make([]float64, 100)
-	for i := 0; i < 100; i++ {
+	squared := make([]float64, POOL_LAYERS)
+	for i := 0; i < POOL_LAYERS; i++ {
 		ct := pool[i]
 		sq_ct := ct * ct
 		squared[i] = sq_ct
@@ -269,17 +228,16 @@ func square_layer_2(pool []float64) []float64 {
 func fc_layer(sq_layer_2 []float64) []float64 {
 	fc_kernels, fc_bias := prepare_fc_layer()
 
-	fc_layers := 10
-	outputs := make([]float64, fc_layers)
-	for o := 0; o < fc_layers; o++ {
-		sum := float64(0)
-		for i := 0; i < 100; i++ {
-			sum += float64(sq_layer_2[i] * fc_kernels[o][i])
+	outputs := make([]float64, FC_LAYERS)
+	for o := 0; o < FC_LAYERS; o++ {
+		sum := 0.
+		for i := 0; i < POOL_LAYERS; i++ {
+			sum += sq_layer_2[i] * fc_kernels[o][i]
 		}
 		outputs[o] = sum
 	}
 
-	for i := 0; i < 10; i++ {
+	for i := 0; i < FC_LAYERS; i++ {
 		outputs[i] += fc_bias[i]
 	}
 
@@ -288,11 +246,8 @@ func fc_layer(sq_layer_2 []float64) []float64 {
 
 func cryptonets(image [][]float64) []float64 {
 	fmt.Println("Cryptonets!")
-	// Inference layers (see Table 1 of `Paper source`)
 
 	// 1. Convolution layer
-	// conv_layer := convolution_layer(image)
-
 	conv_layer := convolution_layer(image)
 
 	// 2. Square activation layer
@@ -310,14 +265,34 @@ func cryptonets(image [][]float64) []float64 {
 	return output
 }
 
-func main() {
-	// Get batched images
-	images, answers := get_images()
+func decode_encrypted_layer(image [][]float64) {
+	for i := 0; i < PADDED_IMAGE_WIDTH; i++ {
+		for j := 0; j < PADDED_IMAGE_WIDTH; j++ {
+			fmt.Print(image[i][j], " ")
+		}
+		fmt.Println()
+	}
+}
 
-	image := images[0]
-	answer := answers[0]
-	for i := 0; i < 29; i++ {
-		for j := 0; j < 29; j++ {
+func decode_conv_layer(image [][][]float64) {
+	for i := 0; i < 5; i++ {
+		for j := 0; j < 13; j++ {
+			for k := 0; k < 13; k++ {
+				fmt.Print(image[i][j][k], " ")
+			}
+		}
+	}
+}
+
+func decode_fc_layer(image []float64) {
+	for i := 0; i < 10; i++ {
+		fmt.Print(image[i], " ")
+	}
+}
+
+func print_binary_image(image [][]float64) {
+	for i := 0; i < PADDED_IMAGE_WIDTH; i++ {
+		for j := 0; j < PADDED_IMAGE_WIDTH; j++ {
 			if image[i][j] > 0 {
 				fmt.Print("1 ")
 			} else {
@@ -327,41 +302,30 @@ func main() {
 		fmt.Println()
 	}
 	fmt.Println()
-	for i := 0; i < 29; i++ {
-		for j := 0; j < 29; j++ {
+}
+
+func print_image(image [][]float64) {
+	for i := 0; i < PADDED_IMAGE_WIDTH; i++ {
+		for j := 0; j < PADDED_IMAGE_WIDTH; j++ {
 			fmt.Print(float64(image[i][j]), " ")
 		}
 		fmt.Println()
 	}
-	fmt.Println()
+}
+
+func main() {
+	// Get batched images
+	images, answers := get_images()
+
+	image := images[0]
+	answer := answers[0]
+	print_binary_image(image)
+	print_image(image)
 	fmt.Println("answer:", answer)
 	fmt.Println()
 
 	// perform cryptonets
 	predicted_images := cryptonets(image)
-
-	// decoded_images
-	fmt.Println(" ========================================= ")
-	fmt.Println(" ============ Final Output =============== ")
-	fmt.Println(" ========================================= ")
-
-	// // print encrypted layer
-	// for i := 0; i < 29; i++ {
-	// 	for j := 0; j < 29; j++ {
-	// 		fmt.Print(float64(image[i*29+j])/16, " ")
-	// 	}
-	// 	fmt.Println()
-	// }
-
-	// // print conv layer
-	// for i := 0; i < 5; i++ {
-	// 	for j := 0; j < 13; j++ {
-	// 		for k := 0; k < 13; k++ {
-	// 			data := float64(predicted_images[i][j][k])
-	// 			fmt.Print(data, " ")
-	// 		}
-	// 	}
-	// }
 
 	// print fc layer
 	for i := 0; i < 10; i++ {
