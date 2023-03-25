@@ -343,7 +343,6 @@ func main() {
 
 	errs := 0
 	for i, image := range images {
-		// perform cryptonets
 		predicted := cryptonets(image)
 		answer := answers[i]
 
