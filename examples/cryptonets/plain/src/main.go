@@ -2,7 +2,6 @@ package main
 
 import (
 	"fmt"
-	"math"
 	"plain/src/mnist"
 	"plain/src/model"
 )
@@ -10,21 +9,21 @@ import (
 // Paper source: https://www.microsoft.com/en-us/research/wp-content/uploads/2016/04/CryptonetsTechReport.pdf
 
 const (
-	SLOTS              = 8192
-	IMAGE_WIDTH        = 28
-	PADDED_IMAGE_WIDTH = IMAGE_WIDTH + 1
-	IMAGE_NORM         = 256
-	STRIDE             = 2
-	CONV_MAP           = 5
-	CONV_SIZE          = 13
-	CONV_WINDOW_LEN    = 5 // 5 x 5
-	CONVOLUTION_SIZE   = 845
-	POOL_LAYERS        = 100
-	FC_LAYERS          = 10
+	SLOTS              = 8192            // number of slots within a plaintext
+	IMAGE_WIDTH        = 28              // width of image
+	PADDED_IMAGE_WIDTH = IMAGE_WIDTH + 1 // width of image after padding
+	IMAGE_NORM         = 256             // normalization scale for images
+	STRIDE             = 2               // stride of convolution window
+	CONV_MAP           = 5               // number of convolution maps
+	CONV_SIZE          = 13              // convolution width (and length)
+	CONV_WINDOW_LEN    = 5               // size of convolution window
+	CONVOLUTION_SIZE   = 845             // number of convolution layers
+	POOL_LAYERS        = 100             // number of pooling layers
+	FC_LAYERS          = 10              // number of fc layers
 )
 
+// Pad the right and bottom edges of an image with 0s
 func pad_image(input [][]float64) [][]float64 {
-	// Pad the upper and left edge with 0s
 	output := make([][]float64, PADDED_IMAGE_WIDTH)
 	for i := 0; i < IMAGE_WIDTH; i++ {
 		row := make([]float64, PADDED_IMAGE_WIDTH)
@@ -38,8 +37,11 @@ func pad_image(input [][]float64) [][]float64 {
 	return output
 }
 
+// Get images from the mnist dataset, while padding and normalizing
+// image values
+//
+// Returns `SLOTS` number of images and corresponding answer key
 func get_images() ([][][]float64, []int) {
-	// Load MNIST datasets
 	dataSet, err := mnist.ReadTestSet("./mnist")
 	if err != nil {
 		fmt.Println(err)
@@ -55,7 +57,6 @@ func get_images() ([][][]float64, []int) {
 		image := dataSet.Data[r]
 		answers[r] = image.Digit
 		image_matrix := make([][]float64, IMAGE_WIDTH)
-		// flatten image into vector
 		for i := 0; i < IMAGE_WIDTH; i++ {
 			image_row := make([]float64, IMAGE_WIDTH)
 			for j := 0; j < IMAGE_WIDTH; j++ {
@@ -79,14 +80,12 @@ func get_images() ([][][]float64, []int) {
 	return images, answers
 }
 
-func round(x, unit float64) float64 {
-	return math.Round(x/unit) * unit
-}
-
+// Prepare convolution layer model weights
 func prepare_conv() ([][]float64, []float64) {
 	return model.ConvKernels, model.ConvBias
 }
 
+// Prepare pool layer model weights
 func prepare_pool_layer() ([][]float64, []float64) {
 	pool_layers := make([][]float64, POOL_LAYERS)
 	for i := 0; i < POOL_LAYERS; i++ {
@@ -100,6 +99,7 @@ func prepare_pool_layer() ([][]float64, []float64) {
 	return pool_layers, model.PoolBias
 }
 
+// Prepare fc layer model weights
 func prepare_fc_layer() ([][]float64, []float64) {
 	fc_layers := make([][]float64, FC_LAYERS)
 	for i := 0; i < FC_LAYERS; i++ {
@@ -112,16 +112,11 @@ func prepare_fc_layer() ([][]float64, []float64) {
 	return fc_layers, model.FcBias
 }
 
+// Perform the convolution layer
+//
+// Weighted sums layer with windows of size 5×5, stride size of 2. From
+// each window, 5 different maps are computed.
 func convolution_layer(image [][]float64) [][][]float64 {
-	// Weighted sums layer with windows of size 5×5, stride size of 2. From
-	// each window, 5 different maps are computed and a padding is added to
-	// the upper side and left side of each image.
-
-	// Create windows
-	// encrypted_images represents 8192 x 841 (padded)
-	// where each row is an image and each column is a point
-
-	// Prepare model weights / bias
 	conv_kernels, conv_bias := prepare_conv()
 
 	outputs := make([][][]float64, CONV_MAP)
@@ -144,7 +139,6 @@ func convolution_layer(image [][]float64) [][][]float64 {
 				}
 				windows[stride_y*CONV_SIZE+stride_x] = window
 
-				// kernel is already in column major form
 				kernel := conv_kernels[o]
 
 				product := make([]float64, CONV_WINDOW_LEN*CONV_WINDOW_LEN)
@@ -172,6 +166,7 @@ func convolution_layer(image [][]float64) [][][]float64 {
 	return outputs
 }
 
+// Square all values
 func square_layer_1(conv_layer [][][]float64) [][][]float64 {
 	squared := make([][][]float64, CONV_MAP)
 	for i := 0; i < CONV_MAP; i++ {
@@ -190,6 +185,9 @@ func square_layer_1(conv_layer [][][]float64) [][][]float64 {
 	return squared
 }
 
+// Perform the pooling layer
+//
+// Weighted sums layer from convolution layer (after squaring)
 func pool_layer(sq_layer_1 [][][]float64) []float64 {
 	pool_kernels, pool_bias := prepare_pool_layer()
 
@@ -215,6 +213,7 @@ func pool_layer(sq_layer_1 [][][]float64) []float64 {
 	return outputs
 }
 
+// Square all values
 func square_layer_2(pool []float64) []float64 {
 	squared := make([]float64, POOL_LAYERS)
 	for i := 0; i < POOL_LAYERS; i++ {
@@ -225,6 +224,9 @@ func square_layer_2(pool []float64) []float64 {
 	return squared
 }
 
+// Perform the fc layer
+//
+// Weighted sums layer from pooling layer (after squaring)
 func fc_layer(sq_layer_2 []float64) []float64 {
 	fc_kernels, fc_bias := prepare_fc_layer()
 
@@ -244,9 +246,8 @@ func fc_layer(sq_layer_2 []float64) []float64 {
 	return outputs
 }
 
-func cryptonets(image [][]float64) []float64 {
-	fmt.Println("Cryptonets!")
-
+// Run cryptonets for a single image
+func cryptonets(image [][]float64) int {
 	// 1. Convolution layer
 	conv_layer := convolution_layer(image)
 
@@ -262,10 +263,20 @@ func cryptonets(image [][]float64) []float64 {
 	// 5. Fully connected layer
 	output := fc_layer(sq_layer_2)
 
-	return output
+	res := 0.
+	index := 0
+	for i := 1; i < FC_LAYERS; i++ {
+		if output[i] > res {
+			res = output[i]
+			index = i
+		}
+	}
+
+	return index
 }
 
-func decode_encrypted_layer(image [][]float64) {
+// Print padded image
+func print_padded_image(image [][]float64) {
 	for i := 0; i < PADDED_IMAGE_WIDTH; i++ {
 		for j := 0; j < PADDED_IMAGE_WIDTH; j++ {
 			fmt.Print(image[i][j], " ")
@@ -274,22 +285,35 @@ func decode_encrypted_layer(image [][]float64) {
 	}
 }
 
-func decode_conv_layer(image [][][]float64) {
-	for i := 0; i < 5; i++ {
-		for j := 0; j < 13; j++ {
-			for k := 0; k < 13; k++ {
+// Print image after convolutions
+func print_image_after_convolution(image [][][]float64) {
+	for i := 0; i < CONV_MAP; i++ {
+		for j := 0; j < CONV_SIZE; j++ {
+			for k := 0; k < CONV_SIZE; k++ {
 				fmt.Print(image[i][j][k], " ")
 			}
 		}
 	}
+	fmt.Println()
 }
 
-func decode_fc_layer(image []float64) {
-	for i := 0; i < 10; i++ {
+// Print image after pool layer
+func print_image_after_pool_layer(image []float64) {
+	for i := 0; i < POOL_LAYERS; i++ {
 		fmt.Print(image[i], " ")
 	}
+	fmt.Println()
 }
 
+// Print image after fc layer
+func print_image_after_fc_layer(image []float64) {
+	for i := 0; i < FC_LAYERS; i++ {
+		fmt.Print(image[i], " ")
+	}
+	fmt.Println()
+}
+
+// Print image as binary values
 func print_binary_image(image [][]float64) {
 	for i := 0; i < PADDED_IMAGE_WIDTH; i++ {
 		for j := 0; j < PADDED_IMAGE_WIDTH; j++ {
@@ -304,6 +328,7 @@ func print_binary_image(image [][]float64) {
 	fmt.Println()
 }
 
+// Print image as normalized values
 func print_image(image [][]float64) {
 	for i := 0; i < PADDED_IMAGE_WIDTH; i++ {
 		for j := 0; j < PADDED_IMAGE_WIDTH; j++ {
@@ -314,23 +339,25 @@ func print_image(image [][]float64) {
 }
 
 func main() {
-	// Get batched images
 	images, answers := get_images()
 
-	image := images[0]
-	answer := answers[0]
-	print_binary_image(image)
-	print_image(image)
-	fmt.Println("answer:", answer)
-	fmt.Println()
+	errs := 0
+	for i, image := range images {
+		// perform cryptonets
+		predicted := cryptonets(image)
+		answer := answers[i]
 
-	// perform cryptonets
-	predicted_images := cryptonets(image)
+		if predicted != answer {
+			errs++
+		}
 
-	// print fc layer
-	for i := 0; i < 10; i++ {
-		data := float64(predicted_images[i])
-		fmt.Print(data, " ")
+		if i > 0 && i%100 == 0 {
+			fmt.Printf("errs %d/%d \t", errs, i)
+			fmt.Println("accuracy", 100.-(100.*float64(errs)/float64(i)))
+		}
 	}
-	fmt.Println()
+
+	fmt.Println(" =========== Final results =========== ")
+	fmt.Printf("errs %d/%d \t", errs, SLOTS)
+	fmt.Println("accuracy", 100.-(100.*float64(errs)/float64(SLOTS)))
 }
