@@ -257,6 +257,9 @@ func cryptonets(image [][]float64) int {
 	// 3. Pool layer
 	pool := pool_layer(sq_layer_1)
 
+	print_image_after_pool_layer(pool)
+	panic("TODO")
+
 	// 4. Square activation layer
 	sq_layer_2 := square_layer_2(pool)
 
@@ -292,7 +295,9 @@ func print_image_after_convolution(image [][][]float64) {
 			for k := 0; k < CONV_SIZE; k++ {
 				fmt.Print(image[i][j][k], " ")
 			}
+			fmt.Println()
 		}
+		fmt.Println()
 	}
 	fmt.Println()
 }
