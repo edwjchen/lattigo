@@ -1,0 +1,4 @@
+Cryptonets!
+Pool layer!
+layer: 0
+sq: 1.8056640625
