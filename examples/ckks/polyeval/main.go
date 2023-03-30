@@ -88,11 +88,20 @@ func chebyshevinterpolation() {
 	slotsIndex[1] = idxG // Assigns index of all odd slots to poly[1] = g(x)
 
 	// Change of variable
+	fmt.Println("================ ")
+	fmt.Println("before ct.scale:", ciphertext.Scale)
+	fmt.Println("================ ")
 	evaluator.MultByConst(ciphertext, 2/(b-a), ciphertext)
 	evaluator.AddConst(ciphertext, (-a-b)/(b-a), ciphertext)
+	fmt.Println("================ ")
+	fmt.Println("ct.scale:", ciphertext.Scale)
+	fmt.Println("================ ")
 	if err := evaluator.Rescale(ciphertext, params.DefaultScale(), ciphertext); err != nil {
 		panic(err)
 	}
+	fmt.Println("================ ")
+	fmt.Println("after ct.scale:", ciphertext.Scale)
+	fmt.Println("================ ")
 
 	// We evaluate the interpolated Chebyshev interpolant on the ciphertext
 	if ciphertext, err = evaluator.EvaluatePolyVector(ciphertext, []*ckks.Polynomial{approxF, approxG}, encoder, slotsIndex, ciphertext.Scale); err != nil {
