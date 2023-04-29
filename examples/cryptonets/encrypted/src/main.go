@@ -84,27 +84,16 @@ func get_images() ([][][]float64, []int) {
 	return images, answers
 }
 
-func (cn CryptoNets) rescale_images(images [][][]float64) [][][]float64 {
-	rescaled_images := make([][][]float64, SLOTS)
-	var scale float64 = 1.
-	for i := 0; i < SLOTS; i++ {
-		rescaled_image := make([][]float64, PADDED_IMAGE_WIDTH)
-		for j := 0; j < PADDED_IMAGE_WIDTH; j++ {
-			rescaled_col := make([]float64, PADDED_IMAGE_WIDTH)
-			for k := 0; k < PADDED_IMAGE_WIDTH; k++ {
-				rescaled_col[k] = images[i][j][k] * scale
-			}
-			rescaled_image[j] = rescaled_col
-		}
-		rescaled_images[i] = rescaled_image
-	}
-
-	return rescaled_images
-}
-
 // Get encryption parameters from a default params with N=8192
 func params() ckks.Parameters {
 	paramsDef := ckks.PN14QP438
+	fmt.Println(paramsDef)
+	fmt.Println(paramsDef.Q)
+	paramsDef.Q = []uint64{0x200000008001, 0x400018001, // 45 + 9 x 34
+		0x3fffd0001, 0x400060001,
+		0x400068001, 0x3fff90001,
+	}
+	fmt.Println(paramsDef.Q)
 	params, err := ckks.NewParametersFromLiteral(paramsDef)
 	if err != nil {
 		panic(err)
@@ -122,11 +111,13 @@ type CryptoNets struct {
 	evaluator ckks.Evaluator
 }
 
+// Encode data
 func (cn CryptoNets) encode(data []complex128) *rlwe.Plaintext {
 	pt := cn.encoder.EncodeNew(data, cn.params.MaxLevel(), cn.params.DefaultScale(), cn.params.LogSlots())
 	return pt
 }
 
+// Encode batch of images
 func (cn CryptoNets) encode_images(images [][][]float64) [][]*rlwe.Plaintext {
 	encoded_images := make([][]*rlwe.Plaintext, PADDED_IMAGE_WIDTH)
 	for i := 0; i < PADDED_IMAGE_WIDTH; i++ {
@@ -144,10 +135,12 @@ func (cn CryptoNets) encode_images(images [][][]float64) [][]*rlwe.Plaintext {
 	return encoded_images
 }
 
+// Encrypt data
 func (cn CryptoNets) encrypt(image *rlwe.Plaintext) *rlwe.Ciphertext {
 	return cn.encryptor.EncryptNew(image)
 }
 
+// Encrypt batch of images
 func (cn CryptoNets) encrypt_images(encoded_images [][]*rlwe.Plaintext) [][]*rlwe.Ciphertext {
 	encrypted_image := make([][]*rlwe.Ciphertext, PADDED_IMAGE_WIDTH)
 	for i := 0; i < PADDED_IMAGE_WIDTH; i++ {
@@ -160,10 +153,12 @@ func (cn CryptoNets) encrypt_images(encoded_images [][]*rlwe.Plaintext) [][]*rlw
 	return encrypted_image
 }
 
+// Decrypt data
 func (cn CryptoNets) decrypt(encrypted *rlwe.Ciphertext) *rlwe.Plaintext {
 	return cn.decryptor.DecryptNew(encrypted)
 }
 
+// Decrypt batch of images
 func (cn CryptoNets) decrypt_images(encrypted_image [][]*rlwe.Ciphertext) [][]*rlwe.Plaintext {
 	decrypted_image := make([][]*rlwe.Plaintext, PADDED_IMAGE_WIDTH)
 	for i := 0; i < PADDED_IMAGE_WIDTH; i++ {
@@ -176,6 +171,7 @@ func (cn CryptoNets) decrypt_images(encrypted_image [][]*rlwe.Ciphertext) [][]*r
 	return decrypted_image
 }
 
+// Decrypt convolution layer
 func (cn CryptoNets) decrypt_conv(encrypted_image [][][]*rlwe.Ciphertext) [][][]*rlwe.Plaintext {
 	decrypted_image := make([][][]*rlwe.Plaintext, CONV_MAP)
 	for i := 0; i < CONV_MAP; i++ {
@@ -192,6 +188,7 @@ func (cn CryptoNets) decrypt_conv(encrypted_image [][][]*rlwe.Ciphertext) [][][]
 	return decrypted_image
 }
 
+// Decrypt pool layer
 func (cn CryptoNets) decrypt_pool(encrypted_image []*rlwe.Ciphertext) []*rlwe.Plaintext {
 	decrypted_image := make([]*rlwe.Plaintext, POOL_LAYERS)
 	for i := 0; i < POOL_LAYERS; i++ {
@@ -200,6 +197,7 @@ func (cn CryptoNets) decrypt_pool(encrypted_image []*rlwe.Ciphertext) []*rlwe.Pl
 	return decrypted_image
 }
 
+// Decrypt fully connected layer
 func (cn CryptoNets) decrypt_fc(encrypted_image []*rlwe.Ciphertext) []*rlwe.Plaintext {
 	decrypted_image := make([]*rlwe.Plaintext, FC_LAYERS)
 	for i := 0; i < FC_LAYERS; i++ {
@@ -208,13 +206,13 @@ func (cn CryptoNets) decrypt_fc(encrypted_image []*rlwe.Ciphertext) []*rlwe.Plai
 	return decrypted_image
 }
 
+// Decode data
 func (cn CryptoNets) decode(decrypted *rlwe.Plaintext) []complex128 {
-	// decode
 	return cn.encoder.Decode(decrypted, cn.params.LogSlots())
 }
 
+// Decode batch of images
 func (cn CryptoNets) decode_images(decrypted_images [][]*rlwe.Plaintext) [][][]float64 {
-	// decode
 	decoded_images := make([][][]float64, PADDED_IMAGE_WIDTH)
 	for i := 0; i < PADDED_IMAGE_WIDTH; i++ {
 		decoded_col := make([][]float64, PADDED_IMAGE_WIDTH)
@@ -231,8 +229,8 @@ func (cn CryptoNets) decode_images(decrypted_images [][]*rlwe.Plaintext) [][][]f
 	return decoded_images
 }
 
+// Decode convolution layer
 func (cn CryptoNets) decode_conv(decrypted_images [][][]*rlwe.Plaintext) [][][][]float64 {
-	// decode
 	decoded_images := make([][][][]float64, CONV_MAP)
 	for i := 0; i < CONV_MAP; i++ {
 		decoded_row := make([][][]float64, CONV_SIZE)
@@ -253,6 +251,7 @@ func (cn CryptoNets) decode_conv(decrypted_images [][][]*rlwe.Plaintext) [][][][
 	return decoded_images
 }
 
+// Decode pooling layer
 func (cn CryptoNets) decode_pool(encoded_image []*rlwe.Plaintext) [][]float64 {
 	decoded_image := make([][]float64, POOL_LAYERS)
 	for i := 0; i < POOL_LAYERS; i++ {
@@ -266,6 +265,7 @@ func (cn CryptoNets) decode_pool(encoded_image []*rlwe.Plaintext) [][]float64 {
 	return decoded_image
 }
 
+// Decode fully connected layer
 func (cn CryptoNets) decode_fc(encoded_image []*rlwe.Plaintext) [][]float64 {
 	decoded_image := make([][]float64, FC_LAYERS)
 	for i := 0; i < FC_LAYERS; i++ {
@@ -279,87 +279,27 @@ func (cn CryptoNets) decode_fc(encoded_image []*rlwe.Plaintext) [][]float64 {
 	return decoded_image
 }
 
-// func (cn CryptoNets) prepare_conv() ([][]*rlwe.Plaintext, []*rlwe.Plaintext) {
-// 	// rescale kernels
-// 	kernel_scale := 262144.
-// 	rescaled_kernels := make([][]float64, 5)
-// 	for k, kernel := range model.ConvKernels {
-// 		rescaled_kernel := make([]float64, 25)
-// 		for i := 0; i < 5; i++ {
-// 			for j := 0; j < 5; j++ {
-// 				// rescale kernel
-// 				val := kernel[i*5+j] * kernel_scale
-// 				rescaled_kernel[i*5+j] = float64(val)
-// 			}
-// 		}
-// 		rescaled_kernels[k] = rescaled_kernel
-// 	}
-
-// 	// encode kernels
-// 	// each weight is encoded as its own plaintext
-// 	encoded_kernels := make([][]*rlwe.Plaintext, 5)
-// 	for i := 0; i < 5; i++ {
-// 		encoded_kernel := make([]*rlwe.Plaintext, 25)
-// 		for j := 0; j < 25; j++ {
-// 			val := rescaled_kernels[i][j]
-// 			kernel := make([]float64, 8192)
-// 			for k := 0; k < 8192; k++ {
-// 				kernel[k] = val
-// 			}
-// 			encoded_kernel[j] = cn.encode(kernel)
-// 		}
-// 		encoded_kernels[i] = encoded_kernel
-// 	}
-
-// 	// encode conv bias
-// 	bias_scale := 262144. * 262144.
-// 	encoded_bias := make([]*rlwe.Plaintext, 5)
-// 	for i := 0; i < 5; i++ {
-// 		val := model.ConvBias[i]
-// 		// rescale val
-// 		val *= bias_scale
-// 		bias := make([]float64, 8192)
-// 		for j := 0; j < 8192; j++ {
-// 			bias[j] = float64(val)
-// 		}
-// 		encoded_bias[i] = cn.encode(bias)
-// 	}
-
-// 	return encoded_kernels, encoded_bias
-// }
-
-func (cn CryptoNets) prepare_conv_scalar() ([][]float64, []float64) {
-	// rescale kernels
-	kernel_scale := 1.
-	rescaled_kernels := make([][]float64, 5)
-	for k, kernel := range model.ConvKernels {
-		rescaled_kernel := make([]float64, 25)
-		for i := 0; i < 5; i++ {
-			for j := 0; j < 5; j++ {
-				// rescale kernel
-				val := kernel[i*5+j] * kernel_scale
-				rescaled_kernel[i*5+j] = float64(val)
-			}
-		}
-		rescaled_kernels[k] = rescaled_kernel
-	}
-
-	// encode conv bias
-	bias_scale := 1.
-	rescale_bias := make([]float64, 5)
-	for i := 0; i < 5; i++ {
-		val := model.ConvBias[i]
-		// rescale val
-		val *= bias_scale
-		rescale_bias[i] = float64(val)
-	}
-
-	return rescaled_kernels, rescale_bias
+// Prepare convolution layer model weights
+func prepare_conv_scalar() ([][]float64, []float64) {
+	return model.ConvKernels, model.ConvBias
 }
 
+// Prepare pooling layer model weights
+func prepare_pool_layer() ([]float64, []float64) {
+	return model.Weights_1, model.PoolBias
+}
+
+// Prepare fully connected layer model weights
+func prepare_fc_layer() ([]float64, []float64) {
+	return model.Weights_3, model.FcBias
+}
+
+// Perform the convolution layer
+//
+// Weighted sums layer with windows of size 5×5, stride size of 2. From
+// each window, 5 different maps are computed.
 func (cn CryptoNets) convolution_layer(encrypted_images [][]*rlwe.Ciphertext) [][][]*rlwe.Ciphertext {
-	// Prepare model weights / bias
-	conv_kernels, conv_bias := cn.prepare_conv_scalar()
+	conv_kernels, conv_bias := prepare_conv_scalar()
 
 	outputs := make([][][]*rlwe.Ciphertext, 5)
 	for o := 0; o < 5; o++ {
@@ -381,12 +321,9 @@ func (cn CryptoNets) convolution_layer(encrypted_images [][]*rlwe.Ciphertext) []
 				}
 				windows[stride_y*13+stride_x] = window
 
-				// dot product
-				product := make([]*rlwe.Ciphertext, 25)
-
-				// kernel is already in column major form
 				kernel := conv_kernels[o]
 
+				product := make([]*rlwe.Ciphertext, 25)
 				for i := 0; i < 25; i++ {
 					new_ct := cn.evaluator.MultByConstNew(window[i], kernel[i])
 					if err := cn.evaluator.Rescale(new_ct, cn.params.DefaultScale(), new_ct); err != nil {
@@ -416,6 +353,7 @@ func (cn CryptoNets) convolution_layer(encrypted_images [][]*rlwe.Ciphertext) []
 	return outputs
 }
 
+// Square all values
 func (cn CryptoNets) square_layer_1(conv_layer [][][]*rlwe.Ciphertext) [][][]*rlwe.Ciphertext {
 	squared := make([][][]*rlwe.Ciphertext, 5)
 	for i := 0; i < 5; i++ {
@@ -429,19 +367,6 @@ func (cn CryptoNets) square_layer_1(conv_layer [][][]*rlwe.Ciphertext) [][][]*rl
 				if err := cn.evaluator.Rescale(relin, cn.params.DefaultScale(), relin); err != nil {
 					panic(err)
 				}
-				// constant := cn.params.Q()[0]
-				// // scale_up := cn.evaluator.ScaleUpNew(relin, rlwe.NewScale(constant))
-				// fmt.Println("before relin.scale:", relin.Scale)
-				// // scale up
-				// relin = cn.evaluator.MultByConstNew(relin, constant)
-				// fmt.Println("scaling relin.scale:", relin.Scale)
-				// relin.Scale = relin.Scale.Mul(rlwe.NewScale(constant))
-				// if err := cn.evaluator.Rescale(relin, relin.Scale, relin); err != nil {
-				// 	fmt.Println("err:", err)
-				// 	panic("Square layer 1: error with rescale")
-				// }
-				// fmt.Println("after relin.scale:", relin.Scale)
-				// panic("todo")
 				squared_col[k] = relin
 			}
 			squared_row[j] = squared_col
@@ -451,101 +376,16 @@ func (cn CryptoNets) square_layer_1(conv_layer [][][]*rlwe.Ciphertext) [][][]*rl
 	return squared
 }
 
-// // func (cn CryptoNets) prepare_pool_layer() ([][]*rlwe.Plaintext, []*rlwe.Plaintext) {
-// // 	// rescale kernels
-// // 	// scale: 32
-// // 	scale := 32.
-// // 	pool_layers := make([][]float64, POOL_LAYERS)
-// // 	for i := 0; i < POOL_LAYERS; i++ {
-// // 		pool_layer := make([]float64, CONVOLUTION_SIZE)
-// // 		for j := 0; j < CONVOLUTION_SIZE; j++ {
-// // 			// transpose weights
-// // 			val := model.Weights_1[i+j*POOL_LAYERS]
-// // 			val *= scale
-// // 			pool_layer[j] = val
-// // 		}
-// // 		pool_layers[i] = pool_layer
-// // 	}
-
-// // 	// encode
-// // 	encoded_kernels := make([][]*rlwe.Plaintext, POOL_LAYERS)
-// // 	for i := 0; i < POOL_LAYERS; i++ {
-// // 		encoded_kernel := make([]*rlwe.Plaintext, CONVOLUTION_SIZE)
-// // 		for j := 0; j < CONVOLUTION_SIZE; j++ {
-// // 			val := pool_layers[i][j]
-// // 			kernel := make([]float64, 8192)
-// // 			for k := 0; k < 8192; k++ {
-// // 				kernel[k] = float64(val)
-// // 			}
-// // 			encoded_kernel[j] = cn.encode(kernel)
-// // 		}
-// // 		encoded_kernels[i] = encoded_kernel
-// // 	}
-
-// // 	// encode conv bias
-// // 	encoded_bias := make([]*rlwe.Plaintext, POOL_LAYERS)
-// // 	for i := 0; i < POOL_LAYERS; i++ {
-// // 		val := model.PoolBias[i]
-// // 		// rescale val
-// // 		val *= scale
-// // 		bias := make([]float64, 8192)
-// // 		for j := 0; j < 8192; j++ {
-// // 			bias[j] = float64(val)
-// // 		}
-// // 		encoded_bias[i] = cn.encode(bias)
-// // 	}
-
-// // 	return encoded_kernels, encoded_bias
-// // }
-
-// func (cn CryptoNets) prepare_pool_kernel(o int, i int) *rlwe.Plaintext {
-// 	// rescale kernels
-// 	scale := 512.
-// 	val := model.Weights_1[o+i*POOL_LAYERS]
-// 	val *= scale
-// 	// fmt.Println(o, i, val)
-
-// 	// encode
-// 	kernel := make([]float64, 8192)
-// 	for k := 0; k < 8192; k++ {
-// 		kernel[k] = float64(val)
-// 	}
-
-// 	return cn.encode(kernel)
-// }
-
-func (cn CryptoNets) prepare_pool_layer() ([]float64, []float64) {
-	return model.Weights_1, model.PoolBias
-}
-
-// func (cn CryptoNets) prepare_pool_bias() []*rlwe.Plaintext {
-// 	// rescale kernels
-// 	scale := 512.
-
-// 	// encode conv bias
-// 	encoded_bias := make([]*rlwe.Plaintext, POOL_LAYERS)
-// 	for i := 0; i < POOL_LAYERS; i++ {
-// 		val := model.PoolBias[i]
-// 		// rescale val
-// 		val *= scale
-// 		bias := make([]float64, 8192)
-// 		for j := 0; j < 8192; j++ {
-// 			bias[j] = float64(val)
-// 		}
-// 		encoded_bias[i] = cn.encode(bias)
-// 	}
-
-// 	return encoded_bias
-// }
-
+// Perform the pooling layer
+//
+// Weighted sums layer from convolution layer (after squaring)
 func (cn CryptoNets) pool_layer(sq_layer_1 [][][]*rlwe.Ciphertext) []*rlwe.Ciphertext {
-	pool_kernels, pool_bias := cn.prepare_pool_layer()
+	pool_kernels, pool_bias := prepare_pool_layer()
 
 	outputs := make([]*rlwe.Ciphertext, POOL_LAYERS)
 	for o := 0; o < POOL_LAYERS; o++ {
 		fmt.Println("layer:", o)
 		index := 0
-
 		products := make([]*rlwe.Ciphertext, CONVOLUTION_SIZE)
 		for i := 0; i < CONV_MAP; i++ {
 			for j := 0; j < CONV_SIZE; j++ {
@@ -555,20 +395,11 @@ func (cn CryptoNets) pool_layer(sq_layer_1 [][][]*rlwe.Ciphertext) []*rlwe.Ciphe
 					if err := cn.evaluator.Rescale(new_ct, cn.params.DefaultScale(), new_ct); err != nil {
 						panic(err)
 					}
-					// data := cn.decode(cn.decrypt(ct))[0]
-					// kernel := cn.decode(cn.prepare_pool_kernel(o, index))[0]
-					// mul := cn.decode(cn.decrypt(res))[0]
-					// fmt.Println(index, data, kernel, mul)
 					products[index] = new_ct
 					index++
 				}
 			}
 		}
-
-		// for i := 0; i < CONVOLUTION_SIZE; i++ {
-		// 	mul := cn.decode(cn.decrypt(products[i]))
-		// 	fmt.Println(i, mul[0])
-		// }
 
 		sum := products[0]
 		for i := 1; i < CONVOLUTION_SIZE; i++ {
@@ -584,6 +415,7 @@ func (cn CryptoNets) pool_layer(sq_layer_1 [][][]*rlwe.Ciphertext) []*rlwe.Ciphe
 	return outputs
 }
 
+// Square all values
 func (cn CryptoNets) square_layer_2(pool_layer []*rlwe.Ciphertext) []*rlwe.Ciphertext {
 	squared := make([]*rlwe.Ciphertext, POOL_LAYERS)
 	for i := 0; i < POOL_LAYERS; i++ {
@@ -593,70 +425,16 @@ func (cn CryptoNets) square_layer_2(pool_layer []*rlwe.Ciphertext) []*rlwe.Ciphe
 		if err := cn.evaluator.Rescale(relin, cn.params.DefaultScale(), relin); err != nil {
 			panic(err)
 		}
-		// constant := cn.params.Q()[1]
-		// scale_up := cn.evaluator.ScaleUpNew(relin, rlwe.NewScale(constant))
-		// if err := cn.evaluator.Rescale(scale_up, relin.Scale, scale_up); err != nil {
-		// 	fmt.Println("err:", err)
-		// 	panic("Square layer 1: error with rescale")
-		// }
 		squared[i] = relin
 	}
 	return squared
 }
 
-func (cn CryptoNets) prepare_fc_layer() ([]float64, []float64) {
-	return model.Weights_3, model.FcBias
-}
-
-// func (cn CryptoNets) prepare_fc_layer() ([][]*rlwe.Plaintext, []*rlwe.Plaintext) {
-// 	// rescale kernels
-// 	scale := 128.
-// 	fc_layers := make([][]float64, FC_LAYERS)
-// 	for i := 0; i < FC_LAYERS; i++ {
-// 		fc_layer := make([]float64, POOL_LAYERS)
-// 		for j := 0; j < FC_LAYERS; j++ {
-// 			// transpose weights
-// 			val := model.Weights_3[i*POOL_LAYERS+j]
-// 			val *= scale
-// 			fc_layer[j] = val
-// 		}
-// 		fc_layers[i] = fc_layer
-// 	}
-
-// 	// encode
-// 	encoded_kernels := make([][]*rlwe.Plaintext, FC_LAYERS)
-// 	for i := 0; i < FC_LAYERS; i++ {
-// 		encoded_kernel := make([]*rlwe.Plaintext, POOL_LAYERS)
-// 		for j := 0; j < POOL_LAYERS; j++ {
-// 			val := fc_layers[i][j]
-// 			kernel := make([]float64, 8192)
-// 			for k := 0; k < 8192; k++ {
-// 				kernel[k] = float64(val)
-// 			}
-// 			encoded_kernel[j] = cn.encode(kernel)
-// 		}
-// 		encoded_kernels[i] = encoded_kernel
-// 	}
-
-// 	// encode conv bias
-// 	encoded_bias := make([]*rlwe.Plaintext, FC_LAYERS)
-// 	for i := 0; i < FC_LAYERS; i++ {
-// 		val := model.PoolBias[i]
-// 		// rescale val
-// 		val *= scale
-// 		bias := make([]float64, 8192)
-// 		for j := 0; j < 8192; j++ {
-// 			bias[j] = float64(val)
-// 		}
-// 		encoded_bias[i] = cn.encode(bias)
-// 	}
-
-// 	return encoded_kernels, encoded_bias
-
-// }
-
+// Perform the fc layer
+//
+// Weighted sums layer from pooling layer (after squaring)
 func (cn CryptoNets) fc_layer(sq_layer_2 []*rlwe.Ciphertext) []*rlwe.Ciphertext {
-	fc_kernels, fc_bias := cn.prepare_fc_layer()
+	fc_kernels, fc_bias := prepare_fc_layer()
 
 	outputs := make([]*rlwe.Ciphertext, FC_LAYERS)
 	for o := 0; o < FC_LAYERS; o++ {
@@ -667,10 +445,6 @@ func (cn CryptoNets) fc_layer(sq_layer_2 []*rlwe.Ciphertext) []*rlwe.Ciphertext 
 			if err := cn.evaluator.Rescale(new_ct, cn.params.DefaultScale(), new_ct); err != nil {
 				panic(err)
 			}
-			// fmt.Println("ct: ", real(cn.decode(cn.decrypt(ct))[0]))
-			// fmt.Println("kernel: ", fc_kernels[o*POOL_LAYERS+i])
-			// fmt.Println("new_ct: ", real(cn.decode(cn.decrypt(new_ct))[0]))
-			// panic("todo")
 			product[i] = new_ct
 		}
 
@@ -690,9 +464,8 @@ func (cn CryptoNets) fc_layer(sq_layer_2 []*rlwe.Ciphertext) []*rlwe.Ciphertext 
 	return outputs
 }
 
+// Run cryptonets for a batch of images
 func (cn CryptoNets) cryptonets(encrypted_images [][]*rlwe.Ciphertext) []*rlwe.Ciphertext {
-	// Inference layers (see Table 1 of `Paper source`)
-
 	// 1. Convolution layer
 	fmt.Println("Convolution")
 	conv_layer := cn.convolution_layer(encrypted_images)
@@ -716,10 +489,46 @@ func (cn CryptoNets) cryptonets(encrypted_images [][]*rlwe.Ciphertext) []*rlwe.C
 	// 5. Fully connected layer
 	fmt.Println("FC")
 	output := cn.fc_layer(sq_layer_2)
-	ct := output[0]
-	fmt.Println("Done... Consumed levels:", cn.params.MaxLevel()-ct.Level())
-
 	return output
+}
+
+// // Print image
+// func print_image
+
+// Print first image after convolution layer
+func print_image_after_convolution(images [][][][]float64) {
+	for i := 0; i < 1; i++ {
+		for j := 0; j < CONV_MAP; j++ {
+			for k := 0; k < CONV_SIZE; k++ {
+				for l := 0; l < CONV_SIZE; l++ {
+					data := images[j][k][l][i]
+					fmt.Print(data, " ")
+				}
+				fmt.Println()
+			}
+			fmt.Println()
+		}
+	}
+}
+
+// Print first image after pool layer
+func print_image_after_pool_layer(images [][]float64) {
+	for i := 0; i < 1; i++ {
+		for j := 0; j < POOL_LAYERS; j++ {
+			data := images[j][i]
+			fmt.Print(data, " ")
+		}
+	}
+}
+
+// Print first image after fc layer
+func print_image_after_fc_layer(images [][]float64) {
+	for i := 0; i < 1; i++ {
+		for j := 0; j < FC_LAYERS; j++ {
+			data := float64(images[j][i])
+			fmt.Print(data, " ")
+		}
+	}
 }
 
 func main() {
@@ -731,7 +540,6 @@ func main() {
 	encoder := ckks.NewEncoder(params)
 	encryptor_sk := ckks.NewEncryptor(params, sk)
 	decryptor := ckks.NewDecryptor(params, sk)
-	// evaluator := bfv.NewEvaluator(params, rlwe.EvaluationKey{})
 	evaluator := ckks.NewEvaluator(params, rlwe.EvaluationKey{Rlk: rlk})
 
 	cn := CryptoNets{
@@ -742,13 +550,9 @@ func main() {
 	fmt.Println("Get images")
 	images, answers := get_images()
 
-	// Rescale images
-	fmt.Println("Rescale images")
-	rescaled_images := cn.rescale_images(images)
-
 	// encode
 	fmt.Println("Encode images")
-	encoded_images := cn.encode_images(rescaled_images)
+	encoded_images := cn.encode_images(images)
 
 	// encrypt
 	fmt.Println("Encrypt images")
@@ -765,64 +569,7 @@ func main() {
 	fmt.Println("Decode images")
 	decoded_images := cn.decode_fc(decrypted_images)
 
-	// for i := 0; i < 1; i++ {
-	// 	for j := 0; j < PADDED_IMAGE_WIDTH; j++ {
-	// 		for k := 0; k < PADDED_IMAGE_WIDTH; k++ {
-	// 			data := float64(decoded_images[j][k][i])
-	// 			fmt.Print(data, " ")
-	// 		}
-	// 		fmt.Println()
-	// 	}
-	// }
-
-	// logSlots := cn.params.LogSlots()
-	// values := make([]complex128, 1<<logSlots)
-
-	// for i := 0; i < 1<<logSlots; i++ {
-	// 	fmt.Println(rescaled_images[i][14][14])
-	// 	values[i] = complex(float64(images[i][14][14]), 0)
-	// }
-
-	// for i := 0; i < 1<<logSlots; i++ {
-	// 	fmt.Print(values[i], " ")
-	// }
-	// fmt.Println()
-
-	// pt := cn.encode(values)
-	// decoded_values := cn.decode(pt)
-
-	// for i := 0; i < 1<<logSlots; i++ {
-	// 	fmt.Print(real(decoded_values[i]), " ")
-	// }
-	// fmt.Println()
-
-	// // Rescale images
-	// fmt.Println("Rescale images")
-	// rescaled_images := cn.rescale_images(images)
-
-	// // encode
-	// fmt.Println("Encode images")
-	// encoded_images := cn.encode_images(rescaled_images)
-
-	// // encrypt
-	// fmt.Println("Encrypt images")
-	// encrypted_images := cn.encrypt_images(encoded_images)
-
-	// // perform cryptonets
-	// // predicted_images := cn.cryptonets(encrypted_images)
-
-	// // decrypt
-	// fmt.Println("Decrypt images")
-	// decrypted_images := cn.decrypt_images(encrypted_images)
-
-	// // decode
-	// fmt.Println("Decode images")
-	// decoded_images := cn.decode_images(decrypted_images)
-
 	// decoded_images
-	fmt.Println(" ========================================= ")
-	fmt.Println(" ============ Final Output =============== ")
-	fmt.Println(" ========================================= ")
 	errs := 0
 	for i := 0; i < SLOTS; i++ {
 		index := 0
@@ -848,6 +595,16 @@ func main() {
 	fmt.Println(" =========== Final results =========== ")
 	fmt.Printf("errs %d/%d \t", errs, SLOTS)
 	fmt.Println("accuracy", 100.-(100.*float64(errs)/float64(SLOTS)))
+
+	// for i := 0; i < 1; i++ {
+	// 	for j := 0; j < PADDED_IMAGE_WIDTH; j++ {
+	// 		for k := 0; k < PADDED_IMAGE_WIDTH; k++ {
+	// 			data := float64(decoded_images[j][k][i])
+	// 			fmt.Print(data, " ")
+	// 		}
+	// 		fmt.Println()
+	// 	}
+	// }
 
 	// for i := 0; i < 1; i++ {
 	// 	for j := 0; j < POOL_LAYERS; j++ {
